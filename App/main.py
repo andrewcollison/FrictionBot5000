@@ -12,6 +12,23 @@ import pyqtgraph as pg
 from random import seed
 from random import random
 
+class startTestThread(QThread):
+    def __init__(self):
+        QThread.__init__(self)
+        self.testName = ""
+        self.testWeightInput = ""
+        self.testDwellInput = ""
+        self.testFeetInput = ""
+        self.testNCyclesInput = ""
+
+    def run(self):
+        print('Test Started')
+        print(self.testName)
+        print(self.testWeightInput)
+        print(self.testDwellInput)
+        print(self.testFeetInput)
+        print(self.testNCyclesInput)
+
 class serialThread(QThread): # Worker thread
     updateS1 = pyqtSignal(str)
 
@@ -107,10 +124,22 @@ class Ui(QtWidgets.QMainWindow):
         # Display Data
         self.lcdS1 = self.findChild(QtWidgets.QLabel, 's1_output')
         self.lcdS2 = self.findChild(QtWidgets.QLabel, 's2_output')
+
+        # Test Paramater Input
+        self.testNameInput = self.findChild(QtWidgets.QLineEdit, 'meta_input_1')
+        self.testWeightInput = self.findChild(QtWidgets.QLineEdit, 'meta_input_2')
+        self.testDwellInput = self.findChild(QtWidgets.QLineEdit, 'meta_input_3')
+        self.testFeetInput = self.findChild(QtWidgets.QLineEdit, 'meta_input_4')
+        self.testNCyclesInput = self.findChild(QtWidgets.QLineEdit, 'meta_input_5')
+
+        # Start Test
+        self.startTestButton = self.findChild(QtWidgets.QPushButton, 'start_test')
+        self.startTestButton.clicked.connect(self.startTestThread)
         
         # Serial Coms
         self.comThread = serialThread()
         self.comThread2 = serialThread2()
+        self.startTestThread = startTestThread()        
 
         # Plot Data
         self.visThread1 = plotThread()
@@ -165,7 +194,17 @@ class Ui(QtWidgets.QMainWindow):
         # print(self.reading)
         # self.dataLine.setData(self.currTime, self.reading)
         self.dataLine2.setData(self.currTime2, self.reading2)
-
+    
+    def startTestThread(self):
+        print('almost started test')
+        self.startTestThread.testName = self.testNameInput.text()
+        self.startTestThread.testWeightInput = self.testWeightInput.text()
+        self.startTestThread.testDwellInput = self.testDwellInput.text()
+        self.startTestThread.testFeetInput = self.testFeetInput.text()
+        self.startTestThread.testNCyclesInput = self.testNCyclesInput.text()
+    def startTestThread(self):
+        self.startTestThread.start()
+    
 
 def serial_ports():
     """ Lists serial port names
