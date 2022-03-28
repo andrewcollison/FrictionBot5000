@@ -1,3 +1,5 @@
+import csv
+from socket import IPV6_MULTICAST_IF
 from PyQt5 import QtWidgets, uic, QtGui
 import sys
 from serial import Serial
@@ -11,17 +13,29 @@ from pyqtgraph import PlotWidget
 import pyqtgraph as pg
 from random import seed
 from random import random
+import os
+from PyQt5.QtWidgets import QMessageBox, QWidget
+from motorControl import motorControl
+from popUpMessage import eMessage
 
 class startTestThread(QThread):
+    updateTestStop = pyqtSignal(str)
+    updateTestPause = pyqtSignal(str)
+
     def __init__(self):
         QThread.__init__(self)
-        self.testName = ""
-        self.testWeightInput = ""
-        self.testDwellInput = ""
-        self.testFeetInput = ""
-        self.testNCyclesInput = ""
+        
+        self.testName = ''
+        self.testWeightInput = ''
+        self.testDwellInput = ''
+        self.testFeetInput = ''
+        self.testNCyclesInput = ''
+        self.testTravelInput = ''
+        self.testAuthorInput = ''
+        self.testTempInput = ''
 
     def run(self):
+        self._go = True
         print('Test Started')
         print(self.testName)
         print(self.testWeightInput)
@@ -29,48 +43,93 @@ class startTestThread(QThread):
         print(self.testFeetInput)
         print(self.testNCyclesInput)
 
+        # Save test paramaters 
+        paramInputs = {'Param': ['test_Name', 'Author', 'Temp' ,'Weight', 'Dwell', 'Feet_Size', 'Num_Cycles', 'Travel_Len'],
+                        'Value': [self.testName, self.testAuthorInput, self.testTempInput, self.testWeightInput, 
+                                    self.testDwellInput, self.testFeetInput, self.testNCyclesInput, self.testTravelInput]}
+        data = pd.DataFrame(data = paramInputs)
+        
+        paramFileName = str(self.testName) + '_params.csv'
+        paramFilePath = str('./Results/') + str(self.testName)
+        if not os.path.exists('Results'): os.makedirs(paramFilePath)
+        if not os.path.exists(paramFilePath): os.makedirs(paramFilePath)
+
+
+        paramPath = './Results/' + self.testName + '/' + paramFileName
+        data.to_csv(paramPath, index = False)
+
+        nCycle = 0
+        while self._go:
+            if nCycle < int(self.testNCyclesInput):
+                
+                motorControl.motor2Position(100) # home position
+                print('moving to home')
+                print(str(nCycle))
+                self.updateTestPause.emit('True')
+
+                time.sleep(5) # Dwell time
+                self.updateTestPause.emit('False')
+                motorControl.motor2Position(6666) # Target position
+                print('moving to target')
+                time.sleep(2.5) # Time to travel
+                nCycle = nCycle + 1
+
+            else:
+                self._go = False
+                self.updateTestStop.emit('True')
+                print('Test Finished')
+
+    def stop(self):
+        self._go = False
+
 class serialThread(QThread): # Worker thread
     updateS1 = pyqtSignal(str)
 
     def __init__(self):
         QThread.__init__(self)
         self.comPort = ""
-    
+        self.testName = ""
+        self.cycleNum = 0         
 
     def run(self):
         ser = Serial(self.comPort)   
-        while True:
-            ser_bytes = ser.readline()        
-            decoded_bytes = str(ser_bytes[0:len(ser_bytes)-2].decode("utf-8"))
-            
-            currTime = datetime.datetime.now()
-            listResults = decoded_bytes[0:5]
-            # print(listResults)
-            self.updateS1.emit(listResults)
-            results =  str(currTime) + ', ' + str(decoded_bytes) + '\n'
-            writeFile('test1.csv', results)
-            # print(decoded_bytes) 
-            
-class serialThread2(QThread): # Worker thread
-    updateS2 = pyqtSignal(str)
+        self._go = True 
+        self._paused = True
+        listResults = []
+        while self._go:
+            if self._paused == False:
+                ser_bytes = ser.readline()        
+                decoded_bytes = str(ser_bytes[0:len(ser_bytes)-2].decode("utf-8"))
+                
+                currTime = datetime.datetime.now()
+                listResults = decoded_bytes[0:5]
+                # print(listResults)
+                self.updateS1.emit(listResults)
+                results =  str(currTime) + ', ' + str(decoded_bytes) + '\n'
 
-    def __init__(self):
-        QThread.__init__(self)
-        self.comPort = ""    
 
-    def run(self):
-        ser = Serial(self.comPort)   
-        while True:
-            ser_bytes = ser.readline()        
-            decoded_bytes = str(ser_bytes[0:len(ser_bytes)-2].decode("utf-8"))
+                paramFileName = str(self.testName)
+                paramPath = './Results/' + self.testName + '/' + paramFileName + '_' + str(self.cycleNum) + '_sg.csv'
+                print(str(self.cycleNum))
+                # fileName = str(self.testName) + '_' + str(self.cycleNum) + '.csv'
+                writeFile(paramPath, results)
+                # print(decoded_bytes) 
+
+            elif self._paused == True:
+                print('test paused in serial thread')
+                results = []
+
+    def pause(self):
+        self._paused = True
+        # print('test paused')
+
+    def unPause(self):
+        self._paused = False
+        self.cycleNum = self.cycleNum +1
+
+    def stop(self):
+        self._go = False     
             
-            currTime = datetime.datetime.now()
-            listResults = decoded_bytes[0:5]
-            # print(listResults)
-            self.updateS2.emit(listResults)
-            results =  str(currTime) + ', ' + str(decoded_bytes) + '\n'
-            writeFile('test2.csv', results)
-            # print(decoded_bytes) 
 
 class plotThread(QThread):
     def __init__(self):
@@ -78,11 +137,7 @@ class plotThread(QThread):
     
     def run(self):
         df = pd.read_csv("test1.csv", header = None, parse_dates=True, index_col = [0])
-        print(df)
-        
-        # plt.plot(df.index, df[1])
-        # plt.show()
-        
+        print(df)        
 
 
 class Ui(QtWidgets.QMainWindow):
@@ -91,26 +146,11 @@ class Ui(QtWidgets.QMainWindow):
         uic.loadUi('serialTest.ui', self)        
         self.currTime = []
         self.reading = []
-        self.currTime2 = []
-        self.reading2 = []
-
-        ###### Serial Line 2
-        self.button2 = self.findChild(QtWidgets.QPushButton, 'serial_connect_2') # Find the button
-        self.button2.clicked.connect(self.comThread2) # Remember to pass the definition/method, not the return value!
-
-        # Drop down 2
-        self.comPortSelect2 = self.findChild(QtWidgets.QComboBox, 'com_select_2')        
-        self.comPortSelect2.addItems(serial_ports())
-        self.comPortSelect2.activated[str].connect(self.comSelect2Changed)
-        
+        # self.testStopFlag = False
 
         ###### Serial Line 1
         self.button = self.findChild(QtWidgets.QPushButton, 'serial_connect_1') # Find the button
-        self.button.clicked.connect(self.comThread) # Remember to pass the definition/method, not the return value!
-
-        # Graph button
-        self.graphS1button = self.findChild(QtWidgets.QPushButton, 'graph_s1')
-        self.graphS1button.clicked.connect(self.visThread1)
+        # self.button.clicked.connect(self.comThread) # Remember to pass the definition/method, not the return value!
 
         # Drop down
         self.comPortSelect = self.findChild(QtWidgets.QComboBox, 'com_select')        
@@ -119,11 +159,9 @@ class Ui(QtWidgets.QMainWindow):
 
         # Inputs
         self.comInput = self.findChild(QtWidgets.QLineEdit, 'serial_input_1')
-        self.comInput2 = self.findChild(QtWidgets.QLineEdit, 'serial_input_2')
 
         # Display Data
         self.lcdS1 = self.findChild(QtWidgets.QLabel, 's1_output')
-        self.lcdS2 = self.findChild(QtWidgets.QLabel, 's2_output')
 
         # Test Paramater Input
         self.testNameInput = self.findChild(QtWidgets.QLineEdit, 'meta_input_1')
@@ -131,45 +169,38 @@ class Ui(QtWidgets.QMainWindow):
         self.testDwellInput = self.findChild(QtWidgets.QLineEdit, 'meta_input_3')
         self.testFeetInput = self.findChild(QtWidgets.QLineEdit, 'meta_input_4')
         self.testNCyclesInput = self.findChild(QtWidgets.QLineEdit, 'meta_input_5')
+        self.testTravelInput = self.findChild(QtWidgets.QLineEdit, 'meta_input_6')
+        self.testAuthorInput = self.findChild(QtWidgets.QLineEdit, 'meta_input_9')
+        self.testTempInput = self.findChild(QtWidgets.QLineEdit, 'meta_input_8')
+        
 
         # Start Test
         self.startTestButton = self.findChild(QtWidgets.QPushButton, 'start_test')
         self.startTestButton.clicked.connect(self.startTestThread)
+        # self.startTestButton.clicked.connect(self.comThread)
+
+        # Stop Test
+        self.stopTestButton = self.findChild(QtWidgets.QPushButton, 'stop_test')
+        self.stopTestButton.clicked.connect(self.stopTest)
         
         # Serial Coms
         self.comThread = serialThread()
-        self.comThread2 = serialThread2()
-        self.startTestThread = startTestThread()        
+        self.startTestThread = startTestThread()                
 
         # Plot Data
         self.visThread1 = plotThread()
         # self.plot([1,2,3,4,5,6,7,8,9,10], [30,32,34,32,33,31,29,32,35,45])
 
         self.dataLine = self.graphWidget.plot(self.currTime, self.reading)
-        self.dataLine2 = self.graphWidget_2.plot(self.currTime, self.reading)
 
         self.show()
-
 
     # Drop down selection boxes
     def comSelect1Changed(self, text):
         # print(text)
         self.comInput.setText(text)
 
-    def comSelect2Changed(self, text):
-        # print(text)
-        self.comInput2.setText(text)
-
-    # Serial Com threads
-    def comThread(self):
-        self.comThread.comPort = self.comInput.text()
-        self.comThread.start()
-        self.comThread.updateS1.connect(self.evt_updateS1)
-
-    def comThread2(self):
-        self.comThread2.comPort2 = self.comInput2.text()
-        self.comThread2.start()
-        self.comThread2.updateS2.connect(self.evt_updateS2)
+   
 
     def visThread1(self):
         self.visThread1.start()
@@ -180,31 +211,72 @@ class Ui(QtWidgets.QMainWindow):
         self.currTime.append(time.time())
         self.reading.append(float(val))
         self.currTime = self.currTime[-100:]
-        self.reading = self.reading[-100:]
-        # print(self.reading)
+        self.reading = self.reading[-100:]        
         self.dataLine.setData(self.currTime, self.reading)
-        # self.dataLine2.setData(self.currTime, self.reading)
 
-    def evt_updateS2(self, val):
-        self.lcdS2.setText(str(val)) 
-        self.currTime2.append(time.time())
-        self.reading2.append(float(val))
-        self.currTime2 = self.currTime2[-100:]
-        self.reading2 = self.reading2[-100:]
-        # print(self.reading)
-        # self.dataLine.setData(self.currTime, self.reading)
-        self.dataLine2.setData(self.currTime2, self.reading2)
+    def evt_updateTestStop(self, val):
+        if str(val) == 'True':
+            # print('Hold up mother fucker')
+            self.stopTest()
+
+    def evt_updateTestPause(self, val):
+        if str(val) == 'True':
+            print('Pause Bitch')
+            self.pauseTest()
+        
+        elif str(val) == 'False':
+            self.unPauseTest()
+            
     
     def startTestThread(self):
-        print('almost started test')
-        self.startTestThread.testName = self.testNameInput.text()
-        self.startTestThread.testWeightInput = self.testWeightInput.text()
-        self.startTestThread.testDwellInput = self.testDwellInput.text()
-        self.startTestThread.testFeetInput = self.testFeetInput.text()
-        self.startTestThread.testNCyclesInput = self.testNCyclesInput.text()
-    def startTestThread(self):
-        self.startTestThread.start()
-    
+        path = 'Results/'+str(self.testNameInput.text())
+        print(self.comInput.text())
+        if self.testNameInput.text() == '':
+            eMessage.critErrorBox('No test name')
+        elif os.path.exists(path): 
+            print('you suck, file already exists')            
+            eMessage.critErrorBox('Test name already exists')
+
+        elif self.comInput.text() == '':
+            print('com port fuckup')            
+            eMessage.critErrorBox('Com port not selected')
+
+        elif self.testNCyclesInput.text() == '':
+            eMessage.critErrorBox('Num Cycles must be > 0')
+
+        elif self.testDwellInput.text() == '':
+            eMessage.critErrorBox('Dwell Time must be > 0')        
+        else:
+            # Start the test control thread
+            self.startTestThread.testName = self.testNameInput.text()
+            self.startTestThread.testWeightInput = self.testWeightInput.text()
+            self.startTestThread.testDwellInput = self.testDwellInput.text()
+            self.startTestThread.testFeetInput = self.testFeetInput.text()
+            self.startTestThread.testNCyclesInput = self.testNCyclesInput.text()
+            self.startTestThread.testTravelInput = self.testTravelInput.text()
+            self.startTestThread.testAuthorInput = self.testAuthorInput.text()
+            self.startTestThread.testTempInput = self.testTempInput.text()
+            self.startTestThread.start()
+
+            # Start the serial com thread for the strain gauge 
+            self.comThread.comPort = self.comInput.text()
+            self.comThread.testName = self.testNameInput.text()
+            self.comThread._go = True
+            self.comThread.start()
+            self.comThread.updateS1.connect(self.evt_updateS1)
+            self.startTestThread.updateTestStop.connect(self.evt_updateTestStop)
+            self.startTestThread.updateTestPause.connect(self.evt_updateTestPause)        
+
+    def stopTest(self):
+        self.startTestThread.stop()
+        self.comThread.stop()
+
+    def pauseTest(self):
+        self.comThread.pause()
+
+    def unPauseTest(self):
+        self.comThread.unPause()
+
 
 def serial_ports():
     """ Lists serial port names
@@ -238,8 +310,6 @@ def writeFile(filename, data):
     file = open(filename, "a")
     file.write(data)
     file.close()
-
-
 
 app = QtWidgets.QApplication(sys.argv)
 window = Ui()
