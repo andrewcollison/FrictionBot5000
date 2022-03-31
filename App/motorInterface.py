@@ -20,8 +20,13 @@ class motorInterface():
         currPos = str(currPos.stdout).strip("'\n")
         currPos = currPos.strip('"')
         currPos = currPos.replace(" ", "")
-        print(currPos)
-        return int(currPos)
+        # print(currPos)
+        try:
+            return int(currPos)
+        except:
+            currPos = 9999
+            print("Moter Position Error")
+            return currPos
 
     def getTarget(self):
         currTarget = subprocess.run(
@@ -31,5 +36,10 @@ class motorInterface():
         currTarget = str(currTarget.stdout).strip("'\n")
         currTarget = currTarget.strip('"')
         currTarget = currTarget.replace(" ", "")
-        print(currTarget)
-        return int(currTarget)
+        # print(currTarget)
+        try:
+            return int(currTarget)
+        except:
+            currTarget = 9999
+            print("Moter Target Error")
+            return currTarget

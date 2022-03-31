@@ -29,17 +29,6 @@ class motorControl():
                     return 'Motor at Target'
                 if time.time() < timeout_start + timeout:
                     return "Motor movement error"
-                
-    
-    # def motorAtTarget():
-    #     if abs(currTarget - currPos) > moe:
-    #                 print('motor in transit')
-    #                 print(abs(currTarget - currPos)) 
-    #                 time.sleep(0.5)
-    #                 currTarget = motorInterface.getTarget()
-    #                 currPos = motorInterface.getFeedback()
-    #                 return ''
-    #             elif abs(currTarget - currPos) < moe:
-    #                 print("Motor at target")
+            
 
         

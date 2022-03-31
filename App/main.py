@@ -47,7 +47,7 @@ class startTestThread(QThread):
         print(self.testFeetInput)
         print(self.testNCyclesInput)
 
-        # Save test paramaters 
+        #### Save test paramaters ####
         paramInputs = {'Param': ['test_Name', 'Author', 'Temp' ,'Weight', 'Dwell', 'Feet_Size', 'Num_Cycles', 'Travel_Len'],
                         'Value': [self.testName, self.testAuthorInput, self.testTempInput, self.testWeightInput, 
                                     self.testDwellInput, self.testFeetInput, self.testNCyclesInput, self.testTravelInput]}
@@ -69,13 +69,15 @@ class startTestThread(QThread):
         motor.moveMotor(self.homeP)
         print("Moving Home")
         self.updateTestStatus.emit('Moving to home')
-        time.sleep(30)
+        time.sleep(15) # Time to Travel
 
-
+        # Start testing cycle
         nCycle = 0
         while self._go:
             if nCycle < int(self.testNCyclesInput):
+
                 # Move to Position 1: should be the same as home position
+                self.updateTestPause.emit('True')
                 motor.moveMotor(self.homeP)
                 time.sleep(5)
                 self.updateTestStatus.emit('Dwell')
@@ -90,12 +92,11 @@ class startTestThread(QThread):
 
                 # Move back to Position 1
                 motor.moveMotor(self.homeP)
-                self.updateTestPause.emit('True')
-                time.sleep(5)
                 self.updateTestStatus.emit('Moving to home')
-                
-                
-
+                time.sleep(0.1)
+                self.updateTestPause.emit('True')
+                time.sleep(15) # Time to Travel home
+                       
                 nCycle = nCycle + 1
 
             else:
@@ -103,26 +104,6 @@ class startTestThread(QThread):
                 self.updateTestStop.emit('True')
                 self.updateTestStatus.emit('Test Finished')
                 print('Test Finished')                
-
-
-        #         motorControl.motor2target(100) # home position
-
-
-        #         # print('moving to home')
-        #         # print(str(nCycle))
-        #         # self.updateTestPause.emit('True')
-
-        #         # time.sleep(5) # Dwell time
-        #         # self.updateTestPause.emit('False')
-        #         # motorControl.motor2Position(6666) # Target position
-        #         # print('moving to target')
-        #         # time.sleep(2.5) # Time to travel
-        #         # nCycle = nCycle + 1
-
-        #     else:
-        #         self._go = False
-        #         self.updateTestStop.emit('True')
-        #         print('Test Finished')
 
     def stop(self):
         self._go = False
@@ -184,10 +165,15 @@ class motorThread(QThread): # Worker thread
         print("Motor Thread Started!!!")
         while self._go:
             if self._paused == False:
+                # Get current position 
                 currP = motorInterface.getPos(self)
                 self.updateCurrP.emit(str(currP))
+                
+                # Get current Target
                 currT = motorInterface.getTarget(self) 
-                self.updateCurrT.emit(str(currT))               
+                self.updateCurrT.emit(str(currT))
+                
+                # Store data in a csv file             
                 currTime = datetime.datetime.now()
                 results =  str(currTime) + ', ' + str(currP) + ', '+ str(currT) + '\n'
                 paramFileName = str(self.testName)
@@ -282,9 +268,7 @@ class Ui(QtWidgets.QMainWindow):
     # Drop down selection boxes
     def comSelect1Changed(self, text):
         # print(text)
-        self.comInput.setText(text)
-
-   
+        self.comInput.setText(text)   
 
     def visThread1(self):
         self.visThread1.start()
@@ -323,8 +307,7 @@ class Ui(QtWidgets.QMainWindow):
             self.pauseTest()
         
         elif str(val) == 'False':
-            self.unPauseTest()
-            
+            self.unPauseTest()            
     
     def startTestThread(self):
         path = 'Results/'+str(self.testNameInput.text())
@@ -381,7 +364,6 @@ class Ui(QtWidgets.QMainWindow):
         # Stop motor thread
         self.mThread.stop()
 
-
     def pauseTest(self):
         self.comThread.pause()
         self.mThread.pause()
@@ -389,7 +371,6 @@ class Ui(QtWidgets.QMainWindow):
     def unPauseTest(self):
         self.comThread.unPause()
         self.mThread.unPause()
-
 
 def serial_ports():
     """ Lists serial port names
