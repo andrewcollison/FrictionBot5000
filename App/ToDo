@@ -1,0 +1,4 @@
+Split the motor control into it's own thread and use pyqt signals to control movement
+Set pause flag for motor feedback to send motor control commands. 
+log displacement data 
+Basically rebuild the motor control 

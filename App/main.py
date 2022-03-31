@@ -15,12 +15,13 @@ from random import seed
 from random import random
 import os
 from PyQt5.QtWidgets import QMessageBox, QWidget
-from motorControl import motorControl
+from motorInterface import motorInterface
 from popUpMessage import eMessage
 
 class startTestThread(QThread):
     updateTestStop = pyqtSignal(str)
     updateTestPause = pyqtSignal(str)
+    updateTestStatus = pyqtSignal(str)
 
     def __init__(self):
         QThread.__init__(self)
@@ -33,6 +34,9 @@ class startTestThread(QThread):
         self.testTravelInput = ''
         self.testAuthorInput = ''
         self.testTempInput = ''
+        self.homeP = 100
+        self.minP = 75
+        self.maxP = 3000
 
     def run(self):
         self._go = True
@@ -57,27 +61,68 @@ class startTestThread(QThread):
 
         paramPath = './Results/' + self.testName + '/' + paramFileName
         data.to_csv(paramPath, index = False)
+        
+        #### Start testing Cycle ####
+        motor = motorInterface()
+
+        # Move to home position aka Position One        
+        motor.moveMotor(self.homeP)
+        print("Moving Home")
+        self.updateTestStatus.emit('Moving to home')
+        time.sleep(30)
+
 
         nCycle = 0
         while self._go:
             if nCycle < int(self.testNCyclesInput):
-                
-                motorControl.motor2Position(100) # home position
-                print('moving to home')
-                print(str(nCycle))
-                self.updateTestPause.emit('True')
+                # Move to Position 1: should be the same as home position
+                motor.moveMotor(self.homeP)
+                time.sleep(5)
+                self.updateTestStatus.emit('Dwell')
+                print("Dwell process")
+                time.sleep(int(self.testDwellInput))
 
-                time.sleep(5) # Dwell time
-                self.updateTestPause.emit('False')
-                motorControl.motor2Position(6666) # Target position
-                print('moving to target')
-                time.sleep(2.5) # Time to travel
+                # Moving to position 2
+                motor.moveMotor(self.maxP)
+                self.updateTestStatus.emit('Moving to P2')
+                self.updateTestPause.emit('False') # Starting data record
+                time.sleep(30) # Time to move to P2                
+
+                # Move back to Position 1
+                motor.moveMotor(self.homeP)
+                self.updateTestPause.emit('True')
+                time.sleep(5)
+                self.updateTestStatus.emit('Moving to home')
+                
+                
+
                 nCycle = nCycle + 1
 
             else:
                 self._go = False
                 self.updateTestStop.emit('True')
-                print('Test Finished')
+                self.updateTestStatus.emit('Test Finished')
+                print('Test Finished')                
+
+
+        #         motorControl.motor2target(100) # home position
+
+
+        #         # print('moving to home')
+        #         # print(str(nCycle))
+        #         # self.updateTestPause.emit('True')
+
+        #         # time.sleep(5) # Dwell time
+        #         # self.updateTestPause.emit('False')
+        #         # motorControl.motor2Position(6666) # Target position
+        #         # print('moving to target')
+        #         # time.sleep(2.5) # Time to travel
+        #         # nCycle = nCycle + 1
+
+        #     else:
+        #         self._go = False
+        #         self.updateTestStop.emit('True')
+        #         print('Test Finished')
 
     def stop(self):
         self._go = False
@@ -99,25 +144,17 @@ class serialThread(QThread): # Worker thread
         while self._go:
             if self._paused == False:
                 ser_bytes = ser.readline()        
-                decoded_bytes = str(ser_bytes[0:len(ser_bytes)-2].decode("utf-8"))
-                
+                decoded_bytes = str(ser_bytes[0:len(ser_bytes)-2].decode("utf-8"))                
                 currTime = datetime.datetime.now()
                 listResults = decoded_bytes[0:5]
-                # print(listResults)
                 self.updateS1.emit(listResults)
                 results =  str(currTime) + ', ' + str(decoded_bytes) + '\n'
-
-
                 paramFileName = str(self.testName)
                 paramPath = './Results/' + self.testName + '/' + paramFileName + '_' + str(self.cycleNum) + '_sg.csv'
                 print(str(self.cycleNum))
-                # fileName = str(self.testName) + '_' + str(self.cycleNum) + '.csv'
                 writeFile(paramPath, results)
-                # print(decoded_bytes) 
-
             elif self._paused == True:
-                print('test paused in serial thread')
-                results = []
+                results = [] # this clears the results buffer between cycles
 
     def pause(self):
         self._paused = True
@@ -129,7 +166,50 @@ class serialThread(QThread): # Worker thread
 
     def stop(self):
         self._go = False     
-            
+
+# Motor Interface thread
+class motorThread(QThread): # Worker thread
+    updateCurrP = pyqtSignal(str)
+    updateCurrT = pyqtSignal(str)
+
+    def __init__(self):
+        QThread.__init__(self)
+        self.testName = ""
+        self.cycleNum = 0         
+
+    def run(self):
+        self._go = True 
+        self._paused = True
+        self._target = None
+        print("Motor Thread Started!!!")
+        while self._go:
+            if self._paused == False:
+                currP = motorInterface.getPos(self)
+                self.updateCurrP.emit(str(currP))
+                currT = motorInterface.getTarget(self) 
+                self.updateCurrT.emit(str(currT))               
+                currTime = datetime.datetime.now()
+                results =  str(currTime) + ', ' + str(currP) + ', '+ str(currT) + '\n'
+                paramFileName = str(self.testName)
+                paramPath = './Results/' + self.testName + '/' + paramFileName + '_' + str(self.cycleNum) + '_motor.csv'
+                writeFile(paramPath, results) 
+
+            elif self._paused == True:
+                results = [] # this clears the results buffer between cycles
+
+    def pause(self):
+        self._paused = True
+        # print('test paused')
+
+    def unPause(self):
+        self._paused = False
+        self.cycleNum = self.cycleNum +1
+
+    def stop(self):
+        self._go = False 
+
+
+
 
 class plotThread(QThread):
     def __init__(self):
@@ -162,6 +242,9 @@ class Ui(QtWidgets.QMainWindow):
 
         # Display Data
         self.lcdS1 = self.findChild(QtWidgets.QLabel, 's1_output')
+        self.lcdCurrT = self.findChild(QtWidgets.QLabel, 'currT_out')
+        self.lcdCurrP = self.findChild(QtWidgets.QLabel, 'currP_out')
+        self.lcdCurrStat = self.findChild(QtWidgets.QLabel, 'stat_out')
 
         # Test Paramater Input
         self.testNameInput = self.findChild(QtWidgets.QLineEdit, 'meta_input_1')
@@ -185,7 +268,8 @@ class Ui(QtWidgets.QMainWindow):
         
         # Serial Coms
         self.comThread = serialThread()
-        self.startTestThread = startTestThread()                
+        self.startTestThread = startTestThread() 
+        self.mThread = motorThread()               
 
         # Plot Data
         self.visThread1 = plotThread()
@@ -213,6 +297,20 @@ class Ui(QtWidgets.QMainWindow):
         self.currTime = self.currTime[-100:]
         self.reading = self.reading[-100:]        
         self.dataLine.setData(self.currTime, self.reading)
+
+    def evt_updateCurrT(self, val):
+        self.lcdCurrT.setText(str(val)) 
+        # self.currTime.append(time.time())
+        # self.reading.append(float(val))
+        # self.currTime = self.currTime[-100:]
+        # self.reading = self.reading[-100:]        
+        # self.dataLine.setData(self.currTime, self.reading)
+
+    def evt_updateCurrP(self, val):
+        self.lcdCurrP.setText(str(val))
+
+    def evt_updateStat(self, val):
+        self.lcdCurrStat.setText(str(val))
 
     def evt_updateTestStop(self, val):
         if str(val) == 'True':
@@ -265,17 +363,32 @@ class Ui(QtWidgets.QMainWindow):
             self.comThread.start()
             self.comThread.updateS1.connect(self.evt_updateS1)
             self.startTestThread.updateTestStop.connect(self.evt_updateTestStop)
-            self.startTestThread.updateTestPause.connect(self.evt_updateTestPause)        
+            self.startTestThread.updateTestPause.connect(self.evt_updateTestPause)
+            self.startTestThread.updateTestStatus.connect(self.evt_updateStat)
+
+            # Start the motorThread
+            self.mThread.testName = self.testNameInput.text()
+            self.mThread.start()
+            self.mThread._go = True
+            self.mThread.updateCurrT.connect(self.evt_updateCurrT) 
+            self.mThread.updateCurrP.connect(self.evt_updateCurrP)
+            
 
     def stopTest(self):
+        # Stop com thread
         self.startTestThread.stop()
         self.comThread.stop()
+        # Stop motor thread
+        self.mThread.stop()
+
 
     def pauseTest(self):
         self.comThread.pause()
+        self.mThread.pause()
 
     def unPauseTest(self):
         self.comThread.unPause()
+        self.mThread.unPause()
 
 
 def serial_ports():
